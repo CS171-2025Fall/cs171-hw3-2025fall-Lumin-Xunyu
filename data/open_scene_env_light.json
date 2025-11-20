@@ -1,0 +1,90 @@
+{
+  "integrator": {
+    "type": "intersection_test",
+    "max_depth": 16,
+    "spp": 64
+  },
+  "film": {
+    "resolution": [
+      800,
+      800
+    ]
+  },
+  "camera": {
+    "position": [
+      0.0,
+      2.0,
+      5.0
+    ],
+    "look_at": [
+      0.0,
+      0.5,
+      0.0
+    ],
+    "ref_up": [
+      0.0,
+      1.0,
+      0.0
+    ],
+    "fov": 30.0,
+    "focal_length": 1.0
+  },
+  "textures": {
+    "envmap": {
+      "type": "image",
+      "path": "assets/warm_reception_dinner_4k.exr",
+      "tex_coordinate_generator": {
+        "type": "uvmapping2d",
+        "scale": [1.0, 1.0],
+        "delta": [0.0, 0.0]
+      }
+    },
+    "grey": {
+      "type": "constant",
+      "color": [0.8, 0.8, 0.8]
+    },
+    "checkerboard_floor": {
+      "type": "checkerboard",
+      "tex_coordinate_generator": {
+        "type": "uvmapping2d",
+        "scale": [8.0, 8.0],
+        "delta": [0.0, 0.0]
+      },
+      "color0": [0.9, 0.9, 0.9],
+      "color1": [0.3, 0.3, 0.3]
+    }
+  },
+  "materials": {
+    "grey_diffuse": {
+      "type": "diffuse",
+      "texture_name": "grey"
+    },
+    "checkerboard_material": {
+      "type": "diffuse",
+      "texture_name": "checkerboard_floor"
+    }
+  },
+  "environment_map": {
+    "texture_name": "envmap",
+    "scale": 3.0
+  },
+  "objects": [
+    {
+      "type": "mesh",
+      "path": "assets/cbox/floor.obj",
+      "material_name": "checkerboard_material"
+    },
+    {
+      "type": "mesh",
+      "path": "assets/cbox/short_box.obj",
+      "material_name": "grey_diffuse",
+      "translate": [-0.7, 0, 0.6]
+    },
+    {
+      "type": "mesh",
+      "path": "assets/cbox/tall_box.obj",
+      "material_name": "grey_diffuse",
+      "translate": [0.7, 0, -0.5]
+    }
+  ]
+}

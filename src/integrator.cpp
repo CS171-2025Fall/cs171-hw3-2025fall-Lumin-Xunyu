@@ -101,6 +101,12 @@ Vec3f IntersectionTestIntegrator::Li(
     interaction.wo = -ray.direction;
 
     if (!intersected) {
+      if (scene->hasInfiniteLight())
+      {
+        const auto& infinite_light = scene->getInfiniteLight();
+        SurfaceInteraction dummy;
+        color = infinite_light->Le(dummy, ray.direction);
+      }
       break;
     }
 
@@ -130,75 +136,77 @@ Vec3f IntersectionTestIntegrator::Li(
     break;
   }
 
-  if (!diffuse_found) {
-    return color;
+  if (diffuse_found) {
+    color = directLighting(scene, interaction, sampler);
   }
 
-  color = directLighting(scene, interaction);
   return color;
 }
 
 Vec3f IntersectionTestIntegrator::directLighting(
-    ref<Scene> scene, SurfaceInteraction &interaction) const {
+    ref<Scene> scene, SurfaceInteraction &interaction, Sampler &sampler) const {
   Vec3f color(0, 0, 0);
-  Float dist_to_light = Norm(point_light_position - interaction.p);
-  Vec3f light_dir     = Normalize(point_light_position - interaction.p);
-  auto test_ray       = DifferentialRay(interaction.p, light_dir);
+  const Float light_intensity = 0.2f;
+  // 遍历所有点光源
+  for (const auto& light : point_lights) {
+    Float dist_to_light = Norm(light.position - interaction.p);
+    Vec3f light_dir     = Normalize(light.position - interaction.p);
+    auto test_ray       = DifferentialRay(interaction.p, light_dir);
 
-  // TODO(HW3): Test for occlusion
-  //
-  // You should test if there is any intersection between interaction.p and
-  // point_light_position using scene->intersect. If so, return an occluded
-  // color. (or Vec3f color(0, 0, 0) to be specific)
-  //
-  // You may find the following variables useful:
-  //
-  // @see bool Scene::intersect(const Ray &ray, SurfaceInteraction &interaction)
-  //    This function tests whether the ray intersects with any geometry in the
-  //    scene. And if so, it returns true and fills the interaction with the
-  //    intersection information.
-  //
-  //    You can use iteraction.p to get the intersection position.
-  //
-  SurfaceInteraction shadow_interaction;
+    SurfaceInteraction shadow_interaction;
+    test_ray.setTimeMax(dist_to_light - EPS);
 
-  test_ray.setTimeMax(dist_to_light - EPS);
+    // 阴影测试
+    if (scene->intersect(test_ray, shadow_interaction)) {
+      // 被遮挡，添加环境光
+      Vec3f albedo = interaction.bsdf->evaluate(interaction);
+      Vec3f ambient = albedo * Vec3f(0.1f, 0.1f, 0.1f) * light_intensity;
+      color += ambient;
+      continue;  // 跳到下一个光源
+    }
 
-  const Float light_intensity = 0.5f;
+    // 未被遮挡，计算直接光照
+    const BSDF *bsdf = interaction.bsdf;
+    bool is_ideal_diffuse = dynamic_cast<const IdealDiffusion *>(bsdf) != nullptr;
 
-  if (scene->intersect(test_ray, shadow_interaction)) {
-    Vec3f albedo = interaction.bsdf->evaluate(interaction);
-    Vec3f occuluded = albedo * Vec3f(0.1f, 0.1f, 0.1f) * light_intensity;
-    return occuluded;
+    if (bsdf != nullptr && is_ideal_diffuse) {
+      Float cos_theta = std::max(Dot(light_dir, interaction.normal), 0.0f);
+      Vec3f albedo = bsdf->evaluate(interaction);
+      Float attenuation = 1.0f / (dist_to_light * dist_to_light);
+
+      // 累加这个光源的贡献
+      color += albedo * light.flux * cos_theta * attenuation * light_intensity;
+    }
   }
 
-  // Not occluded, compute the contribution using perfect diffuse diffuse model
-  // Perform a quick and dirty check to determine whether the BSDF is ideal
-  // diffuse by RTTI
-  const BSDF *bsdf      = interaction.bsdf;
-  bool is_ideal_diffuse = dynamic_cast<const IdealDiffusion *>(bsdf) != nullptr;
+  // 环境光采样
+  if (scene->hasInfiniteLight())
+  {
+    const auto& env_light = scene->getInfiniteLight();
+    const int num_env_samples = 5;
+    
+    for (int i = 0; i < num_env_samples; ++i)
+    {
+      // sample() 会修改 interaction.wi，把它设置为指向光源的方向
+      SurfaceInteraction env_interaction = env_light->sample(interaction, sampler);
+      
+      // 正确：使用 interaction.wi（被 sample 修改过的），而不是 env_interaction.wi（默认为0）
+      Vec3f wi = Normalize(interaction.wi);
+      Float cos_theta = std::max(Dot(wi, interaction.normal), 0.0f);
 
-  if (bsdf != nullptr && is_ideal_diffuse) {
-    // TODO(HW3): Compute the contribution
-    //
-    // You can use bsdf->evaluate(interaction) * cos_theta to approximate the
-    // albedo. In this homework, we do not need to consider a
-    // radiometry-accurate model, so a simple phong-shading-like model is can be
-    // used to determine the value of color.
-
-    // The angle between light direction and surface normal
-    Float cos_theta =
-        std::max(Dot(light_dir, interaction.normal), 0.0f);  // one-sided
-
-    // You should assign the value to color
-    // color = ...
-
-    Vec3f albedo = bsdf->evaluate(interaction);
-    //Vec3f ambient = albedo * Vec3f(0.1f, 0.1f, 0.1f);
-
-    Float attenuation = 1.0f / (dist_to_light * dist_to_light);
-
-    color = albedo * point_light_flux * cos_theta * attenuation * light_intensity;
+      // 创建阴影光线测试可见性
+      auto shadow_ray = DifferentialRay(interaction.p, wi);
+      SurfaceInteraction shadow_interaction;
+      
+      // 如果光线没有被遮挡，累加环境光贡献
+      if (!scene->intersect(shadow_ray, shadow_interaction))
+      {
+        Vec3f albedo = interaction.bsdf->evaluate(interaction);
+        Vec3f Le = env_light->Le(env_interaction, wi);
+        // Monte Carlo 估计：除以采样数量
+        color += albedo * Le * cos_theta / Float(num_env_samples);
+      }
+    }
   }
 
   return color;

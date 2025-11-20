@@ -282,6 +282,8 @@ public:
   RDR_FORCEINLINE virtual void setSeed(int i) { engine.seed(i); }
   RDR_FORCEINLINE virtual void setPixelIndex2D(const Vec2i &index) {
     pixel_index = index;
+    // 为每个像素设置唯一的随机种子，避免横向条纹
+    setSeed(index.x * 8191 + index.y * 131071);
   }
 
   RDR_FORCEINLINE virtual const Vec2i &getPixelIndex2D() const {
@@ -332,7 +334,11 @@ RDR_FORCEINLINE Vec3f CosineSampleHemisphere(const Vec2f &u) {
 
 RDR_FORCEINLINE Vec3f UniformSampleSphere(const Vec2f &u) {
   // This is left as the next assignment
-  UNIMPLEMENTED;
+  Float cos_theta = 1.0f - 2.0f * u.x;  // cos(theta) ∈ [-1, 1]
+  Float sin_theta = std::sqrt(std::max(0.0f, 1.0f - cos_theta * cos_theta));
+  Float phi = 2.0f * PI * u.y;  // phi ∈ [0, 2π)
+  
+  return SphericalDirection(sin_theta, cos_theta, phi);
 }
 
 RDR_FORCEINLINE Vec3f UniformSampleTriangle(const Vec2f &u) {
