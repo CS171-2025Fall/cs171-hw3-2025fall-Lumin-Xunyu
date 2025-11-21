@@ -91,6 +91,15 @@
     "light_blue": {
       "type": "constant",
       "color": [0.3, 0.5, 0.7]
+    },
+    "red_brick_texture": {
+      "type": "image",
+      "path": "assets/warm_reception_dinner_4k.exr",
+      "tex_coordinate_generator": {
+        "type": "uvmapping2d",
+        "scale": [2.0, 2.0],
+        "delta": [0.0, 0.0]
+      }
     }
   },
   "materials": {
@@ -125,6 +134,10 @@
     "light_blue_diffuse": {
       "type": "diffuse",
       "texture_name": "light_blue"
+    },
+    "red_brick_material": {
+      "type": "diffuse",
+      "texture_name": "red_brick_texture"
     }
   },
   "objects": [
@@ -151,7 +164,7 @@
     {
       "type": "mesh",
       "path": "assets/cbox/back.obj",
-      "material_name": "checkerboard_back_wall_material"
+      "material_name": "red_brick_material"
     },
     {
       "type": "mesh",
@@ -162,7 +175,7 @@
     {
       "type": "mesh",
       "path": "assets/cbox/tall_box.obj",
-      "material_name": "light_blue_diffuse",
+      "material_name": "red_brick_material",
       "translate": [0.7, 0, -0.5]
     }
   ]

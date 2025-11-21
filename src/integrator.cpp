@@ -183,7 +183,7 @@ Vec3f IntersectionTestIntegrator::directLighting(
   if (scene->hasInfiniteLight())
   {
     const auto& env_light = scene->getInfiniteLight();
-    const int num_env_samples = 5;
+    const int num_env_samples = 30;
     
     for (int i = 0; i < num_env_samples; ++i)
     {
