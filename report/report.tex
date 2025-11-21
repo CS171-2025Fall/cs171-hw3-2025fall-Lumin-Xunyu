@@ -23,10 +23,10 @@
 \lstset{basicstyle=\ttfamily}
 
 % Title portion
-\title{Assignment 1:\\ {Exploring OpenGL Programming}} 
+\title{Assignment 3:\\ {Basic Ray Tracing}} 
 
-\author{Name: \quad \\ student number:\
-\\email: \quad \texttt{}}
+\author{Name: Xu WeiHan\quad \\ student number: 2023533008\
+\\email: \quad \texttt{xuwh2023@shanghaitech.edu.cn}}
 
 % Document starts
 \begin{document}
@@ -35,8 +35,243 @@
 \vspace*{2 ex}
 
 \section{Introduction}
-\section{Implementation Details}
-\section{Results}
 
+In this assignment. I implemented the following tasks:
+
+\begin{itemize}
+    \item  Compile the source code and configure the language server environment.  (MUST)
+    \item  Implement ray-triangle intersection functionality. (MUST)
+    \item  Implement ray-AABB intersection functionality.(MUST)
+    \item Implement the BVH (Bounding Volume Hierarchy) construction. (MUST)
+    \item Implement the IntersectionTestIntegrator and PerfectRefraction material for basic ray tracing validation, handing refractive and solid surface interactions (MUST)
+    \item  Implement a direct lighting function with diffuse BRDF and shadow testing. (MUST)
+    \item  Implement anti-aliasing via multi-ray sampling per pixel within a sub-pixel aperture.(MUST)
+    \item  Implement support for multiple light sources. (OPTIONAL)
+    \item  Implement environment lighting via environment maps. (OPTIONAL)
+    \item  Investigate texture mapping support in the code base, utilize them on an exmaple scene and understand the texture mapping (OPTIONAL)
+\end{itemize}
+
+\section{Implementation Details}
+\subsection{Ray-Triangle Intersection}
+
+The ray-triangle intersection is implemented in the \texttt{TriangleIntersect} function (lines 73-152 in \texttt{src/accel.cpp}) using the \textbf{Möller-Trumbore algorithm}.
+
+The implementation follows these key steps:
+\begin{enumerate}
+    \item Compute edge vectors: $\mathbf{e}_1 = \mathbf{v}_1 - \mathbf{v}_0$ and $\mathbf{e}_2 = \mathbf{v}_2 - \mathbf{v}_0$
+    \item Calculate determinant: $\text{det} = \mathbf{e}_1 \cdot (\mathbf{d} \times \mathbf{e}_2)$, reject if $|\text{det}| < 10^{-8}$
+    \item Compute barycentric coordinates $u$ and $v$, verify $u, v \geq 0$ and $u + v \leq 1$
+    \item Calculate intersection distance $t$ and check if $t \in [t_{\min}, t_{\max}]$
+    \item Update surface interaction with barycentric coordinates $(1-u-v, u, v)$
+\end{enumerate}
+
+The implementation uses double precision for intermediate calculations to ensure numerical stability, then converts results back to single precision.
+
+\subsection{Ray-AABB Intersection}
+
+The ray-AABB (Axis-Aligned Bounding Box) intersection is implemented in the \texttt{AABB::intersect} method (lines 32-65 in \texttt{src/accel.cpp}) using the \textbf{slab method}.
+
+The implementation follows these steps:
+\begin{enumerate}
+    \item Compute intersection times with all three pairs of parallel planes:
+    \begin{equation}
+        \mathbf{t}_1 = (\mathbf{low} - \mathbf{o}) \cdot \mathbf{d}^{-1}, \quad \mathbf{t}_2 = (\mathbf{upper} - \mathbf{o}) \cdot \mathbf{d}^{-1}
+    \end{equation}
+    where $\mathbf{d}^{-1}$ is the safe inverse direction of the ray
+    
+    \item Calculate near and far intersection points for each axis:
+    \begin{equation}
+        \mathbf{t}_{\text{near}} = \min(\mathbf{t}_1, \mathbf{t}_2), \quad \mathbf{t}_{\text{far}} = \max(\mathbf{t}_1, \mathbf{t}_2)
+    \end{equation}
+    
+    \item Determine entry and exit times:
+    \begin{equation}
+        t_{\text{enter}} = \max(t_{\text{near}}), \quad t_{\text{exit}} = \min(t_{\text{far}})
+    \end{equation}
+    
+    \item Check validity: if $t_{\text{enter}} > t_{\text{exit}}$, no intersection exists
+    
+    \item Return $t_{\text{enter}}$ and $t_{\text{exit}}$ via output pointers
+\end{enumerate}
+
+This method efficiently tests ray-box intersection by treating the AABB as the intersection of three slabs perpendicular to the coordinate axes.
+
+\subsection{BVH (Bounding Volume Hierarchy) Construction}
+
+The BVH construction is implemented in the \texttt{BVHTree::build} method (lines 122-220 in \texttt{include/rdr/bvh\_tree.h}) using a recursive top-down approach.
+
+The implementation follows these key steps:
+\begin{enumerate}
+    \item \textbf{Pre-compute Bounding Box}: Calculate the AABB that encompasses all primitives in the current span $[\text{span\_left}, \text{span\_right})$
+    
+    \item \textbf{Stopping Criteria}: Create a leaf node if either:
+    \begin{itemize}
+        \item Recursion depth $\geq$ 22 (CUTOFF\_DEPTH), or
+        \item Number of primitives $\leq$ 1
+    \end{itemize}
+    
+    \item \textbf{Splitting Strategy}: Use median split heuristic:
+    \begin{itemize}
+        \item Select splitting dimension as the longest axis of the bounding box
+        \item Partition primitives at the median using \texttt{std::nth\_element}
+        \item Sort by centroid position along the chosen axis
+    \end{itemize}
+    
+    \item \textbf{Recursive Construction}: Build left and right subtrees:
+    \begin{equation}
+        \text{split} = \text{span\_left} + \frac{\text{count}}{2}
+    \end{equation}
+    Left subtree: $[\text{span\_left}, \text{split})$, Right subtree: $[\text{split}, \text{span\_right})$
+    
+    \item \textbf{Node Organization}: Store internal nodes in a separate array with pointers to children and associated AABBs
+\end{enumerate}
+
+The BVH accelerates ray tracing by hierarchical pruning: rays only traverse subtrees whose AABBs intersect with the ray, significantly reducing intersection tests.
+
+\subsection{IntersectionTestIntegrator and PerfectRefraction Material}
+
+This implementation provides basic ray tracing validation with support for refractive and solid surface interactions.
+
+\subsubsection{IntersectionTestIntegrator}
+
+Implemented in \texttt{src/integrator.cpp} (lines 28-213), this integrator traces rays through the scene and handles different material types:
+
+\begin{enumerate}
+    \item \textbf{Ray Generation}: For each pixel, generate rays using Monte Carlo sampling:
+    \begin{itemize}
+        \item Sample pixel positions using \texttt{Sampler::getPixelSample}
+        \item Generate differential rays via \texttt{Camera::generateDifferentialRay}
+    \end{itemize}
+    
+    \item \textbf{Ray Tracing Loop}: Recursively trace rays up to \texttt{max\_depth} bounces:
+    \begin{itemize}
+        \item Test ray-scene intersection using \texttt{scene->intersect}
+        \item Identify surface type via RTTI (IdealDiffusion or PerfectRefraction)
+        \item Handle infinite lights for missed rays
+    \end{itemize}
+    
+    \item \textbf{Surface Handling}:
+    \begin{itemize}
+        \item \textit{Diffuse surfaces}: Terminate and compute direct lighting
+        \item \textit{Refractive surfaces}: Sample new direction and spawn continuation ray
+        \item \textit{Other surfaces}: Terminate ray path
+    \end{itemize}
+    
+    \item \textbf{Direct Lighting}: Compute illumination from point lights and environment maps with shadow testing and Monte Carlo integration
+\end{enumerate}
+
+\subsubsection{PerfectRefraction Material}
+
+Implemented in \texttt{src/bsdf.cpp} (lines 77-123), this material simulates perfect specular refraction and total internal reflection:
+
+\begin{enumerate}
+    \item \textbf{Interface Detection}: Determine ray direction relative to surface normal:
+    \begin{equation}
+        \text{entering} = \cos\theta_i = \mathbf{n} \cdot \mathbf{w}_o > 0
+    \end{equation}
+    
+    \item \textbf{IOR Adjustment}: Correct refractive index based on ray direction:
+    \begin{equation}
+        \eta_{\text{corrected}} = \begin{cases}
+            \eta & \text{if entering} \\
+            1/\eta & \text{if exiting}
+        \end{cases}
+    \end{equation}
+    
+    \item \textbf{Refraction Calculation}: Attempt to compute refracted direction using Snell's law:
+    \begin{equation}
+        \mathbf{w}_i = \text{Refract}(\mathbf{w}_o, \mathbf{n}_{\text{corrected}}, \eta_{\text{corrected}})
+    \end{equation}
+    
+    \item \textbf{Total Internal Reflection}: If refraction fails (critical angle exceeded), perform perfect reflection:
+    \begin{equation}
+        \mathbf{w}_i = \text{Reflect}(\mathbf{w}_o, \mathbf{n}_{\text{corrected}})
+    \end{equation}
+\end{enumerate}
+
+The material returns a delta distribution (pdf = 1.0) since it represents perfect specular interactions.
+
+\subsection{Direct Lighting with Diffuse BRDF and Shadow Testing}
+
+The direct lighting function is implemented in \texttt{IntersectionTestIntegrator::directLighting} (lines 146-213 in \texttt{src/integrator.cpp}). It computes illumination from both point lights and environment maps with visibility testing.
+
+\subsubsection{Point Light Illumination}
+
+For each point light in the scene:
+\begin{enumerate}
+    \item \textbf{Light Direction and Distance}: Compute normalized direction and distance to light:
+    \begin{equation}
+        \mathbf{l} = \text{Normalize}(\mathbf{p}_{\text{light}} - \mathbf{p}), \quad d = \|\mathbf{p}_{\text{light}} - \mathbf{p}\|
+    \end{equation}
+    
+    \item \textbf{Shadow Testing}: Cast shadow ray from surface point to light source with $t_{\max} = d - \epsilon$. If intersected, add ambient term and skip to next light
+    
+    \item \textbf{Direct Lighting Computation}: For visible lights, compute radiance using diffuse BRDF:
+    \begin{equation}
+        L_d = \frac{\rho}{\pi} \cdot \Phi_{\text{light}} \cdot \max(0, \mathbf{n} \cdot \mathbf{l}) \cdot \frac{1}{d^2}
+    \end{equation}
+    where $\rho$ is the albedo from BSDF evaluation, $\Phi_{\text{light}}$ is the light flux
+\end{enumerate}
+
+\subsubsection{Environment Map Illumination}
+
+For scenes with infinite area lights:
+\begin{enumerate}
+    \item \textbf{Monte Carlo Sampling}: Generate 30 samples from environment map using \texttt{InfiniteLight::sample}
+    
+    \item \textbf{Visibility Testing}: For each sample direction $\mathbf{w}_i$, cast shadow ray to test occlusion
+    
+    \item \textbf{Radiance Integration}: Accumulate unoccluded contributions:
+    \begin{equation}
+        L_{\text{env}} = \frac{1}{N}\sum_{i=1}^{N} \frac{\rho}{\pi} \cdot L_e(\mathbf{w}_i) \cdot \max(0, \mathbf{n} \cdot \mathbf{w}_i)
+    \end{equation}
+    where $N=30$ is the number of environment samples
+\end{enumerate}
+
+\subsection{Anti-Aliasing via Multi-Ray Sampling}
+
+Anti-aliasing is implemented in the \texttt{IntersectionTestIntegrator::render} method (lines 41-77 in \texttt{src/integrator.cpp}) using stochastic sub-pixel sampling.
+
+\begin{enumerate}
+    \item \textbf{Samples Per Pixel (SPP)}: For each pixel $(dx, dy)$, generate \texttt{spp} rays with randomized sub-pixel positions
+    
+    \item \textbf{Sub-Pixel Jittering}: Use \texttt{Sampler::getPixelSample} to generate random positions within the pixel aperture $[dx, dx+1] \times [dy, dy+1]$
+    
+    \item \textbf{Ray Generation}: Create differential rays for each sample position via \texttt{Camera::generateDifferentialRay}
+    
+    \item \textbf{Monte Carlo Integration}: Accumulate radiance contributions:
+    \begin{equation}
+        L_{\text{pixel}} = \frac{1}{\text{spp}} \sum_{i=1}^{\text{spp}} L_i(\mathbf{r}_i)
+    \end{equation}
+    where $\mathbf{r}_i$ is the $i$-th ray sampled at a random sub-pixel position
+    
+    \item \textbf{Film Accumulation}: Each sample is committed to the film using \texttt{Film::commitSample}, which internally averages all contributions
+\end{enumerate}
+
+This approach effectively reduces aliasing artifacts by averaging multiple samples with different ray directions per pixel, smoothing out high-frequency discontinuities at geometric edges.
+\section{Results}
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{1.png}
+  \caption{cbox with no refract}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{2.png}
+  \caption{cbox with refract}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{3.png}
+  \caption{environment light}
+\end{figure}
+
+\begin{figure}[h]
+  \centering
+  \includegraphics[width=\linewidth]{4.png}
+  \caption{texture mapping}
+\end{figure}
 \end{document}
 
